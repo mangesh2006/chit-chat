@@ -124,3 +124,144 @@ export async function sendVerificationEmail({
     `,
   });
 }
+
+export async function sendPasswordResetEmail({
+  email,
+  name,
+  token,
+}: {
+  email: string;
+  name: string;
+  token: string;
+}) {
+  const appUrl = process.env.APP_URL;
+
+  if (!appUrl) {
+    throw new Error("APP_URL is not configured");
+  }
+
+  const resetUrl = `${appUrl}/reset-password?token=${token}`;
+
+  await transporter.sendMail({
+    from: `"ChitChat" <${process.env.SMTP_USER}>`,
+    to: email,
+    subject: "Reset your ChitChat password",
+
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <body style="
+          margin:0;
+          padding:40px 20px;
+          background:#f6f7f9;
+          font-family:Arial,sans-serif;
+        ">
+
+          <div style="
+            max-width:520px;
+            margin:auto;
+            background:white;
+            border-radius:16px;
+            padding:40px;
+          ">
+
+            <div style="
+              width: 44px;
+              height: 44px;
+              border-radius: 12px;
+              background: linear-gradient(
+                135deg,
+                #3b82f6,
+                #7c3aed
+              );
+              color: white;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 22px;
+              font-weight: bold;
+            ">
+              C
+            </div>
+
+            <h1 style="
+              margin:0 0 16px;
+              font-size:24px;
+              color:#111;
+            ">
+              Reset your password
+            </h1>
+
+            <p style="
+              color:#555;
+              line-height:1.6;
+            ">
+              Hi ${name},
+            </p>
+
+            <p style="
+              color:#555;
+              line-height:1.6;
+            ">
+              We received a request to reset your
+              ChitChat password.
+            </p>
+
+            <div style="margin:30px 0;">
+
+              <a
+              href="${resetUrl}"
+              style="
+                display: inline-block;
+                margin: 20px 0;
+                padding: 13px 22px;
+                border-radius: 10px;
+                background: #4f46e5;
+                color: white;
+                text-decoration: none;
+                font-weight: 600;
+              "
+            >
+              Verify Email
+            </a>
+
+            </div>
+
+            <p style="
+              color:#777;
+              font-size:13px;
+              line-height:1.6;
+            ">
+              This link will expire in 15 minutes.
+            </p>
+
+            <p style="
+              color:#777;
+              font-size:13px;
+              line-height:1.6;
+            ">
+              If you didn't request a password reset,
+              you can safely ignore this email.
+            </p>
+
+            <hr style="
+              border:none;
+              border-top:1px solid #eee;
+              margin:30px 0;
+            ">
+
+            <p style="
+              color:#999;
+              font-size:12px;
+              text-align:center;
+            ">
+              © ChitChat
+            </p>
+
+          </div>
+
+        </body>
+      </html>
+    `,
+  });
+}

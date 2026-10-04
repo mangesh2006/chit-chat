@@ -17,6 +17,7 @@
     "cn": "^0.4.0",
     "dotenv": "^18.0.5",
     "framer-motion": "^13.4.6",
+    "ioredis": "^6.0.0",
     "jose": "^6.2.12",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.49.0",
