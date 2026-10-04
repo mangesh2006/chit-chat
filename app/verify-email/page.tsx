@@ -26,6 +26,10 @@ export default function VerifyEmailPage() {
 
     const [message, setMessage] = useState("");
 
+    const [resending, setResending] = useState(false);
+    const [resendMessage, setResendMessage] = useState("");
+    const [resendCooldown, setResendCooldown] = useState(0);
+
     useEffect(() => {
         if (!token) return;
 
@@ -66,6 +70,61 @@ export default function VerifyEmailPage() {
         verifyEmail();
     }, [token]);
 
+    useEffect(() => {
+        if (resendCooldown <= 0) return;
+
+        const timer = setInterval(() => {
+            setResendCooldown((prev) => prev - 1);
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [resendCooldown]);
+
+    const resendVerification = async () => {
+        if (!email || resending || resendCooldown > 0) {
+            return;
+        }
+
+        try {
+            setResending(true);
+            setResendMessage("");
+
+            const response = await fetch(
+                "/api/auth/resend-verification",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        email,
+                    }),
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                setResendMessage(
+                    data.message || "Unable to resend email."
+                );
+                return;
+            }
+
+            setResendMessage(
+                "Verification email sent. Please check your inbox."
+            );
+
+            setResendCooldown(60);
+        } catch {
+            setResendMessage(
+                "Something went wrong. Please try again."
+            );
+        } finally {
+            setResending(false);
+        }
+    };
+
     return (
         <main className="min-h-screen bg-background flex items-center justify-center px-4">
             <Card className="w-full max-w-md border-border/60 shadow-lg">
@@ -104,6 +163,27 @@ export default function VerifyEmailPage() {
                                     Check your spam folder or request another
                                     verification email.
                                 </p>
+
+                                <Button
+                                    variant="outline"
+                                    className="mt-2 h-auto p-2"
+                                    disabled={
+                                        resending || resendCooldown > 0 || !email
+                                    }
+                                    onClick={resendVerification}
+                                >
+                                    {resending
+                                        ? "Sending..."
+                                        : resendCooldown > 0
+                                            ? `Resend in ${resendCooldown}s`
+                                            : "Resend verification email"}
+                                </Button>
+
+                                {resendMessage && (
+                                    <p className="mt-2 text-xs text-muted-foreground">
+                                        {resendMessage}
+                                    </p>
+                                )}
                             </div>
 
                             <Button
