@@ -52,6 +52,7 @@ export async function GET(req: Request) {
         avatar: true,
         emailVerified: true,
         createdAt: true,
+        showOnlineStatus: true,
       },
     });
 
@@ -81,6 +82,7 @@ export async function GET(req: Request) {
       user: {
         ...user,
         avatar: avatarUrl,
+        showOnlineStatus: user.showOnlineStatus,
       },
     });
   } catch (error) {

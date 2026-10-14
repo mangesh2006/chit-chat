@@ -125,9 +125,18 @@ export default function ChatPage() {
 
     const [infoOpen, setInfoOpen] = useState(false);
 
+    const [showOnlineStatus, setShowOnlineStatus] = useState(true);
+
+    const showOnlineStatusRef = useRef(true);
+
+    useEffect(() => {
+        showOnlineStatusRef.current = showOnlineStatus;
+    }, [showOnlineStatus]);
+
     const router = useRouter()
 
     const selectedConversationRef = useRef<Conversation | null>(null);
+
 
     useEffect(() => {
         selectedConversationRef.current = selectedConversation;
@@ -186,6 +195,7 @@ export default function ChatPage() {
                     setUsername(data.user.username)
                     setName(data.user.name)
                     setUserAvatar(data.user.avatar)
+                    setShowOnlineStatus(data.user.showOnlineStatus ?? true);
                 }
             } catch (error) {
                 console.error("FETCH_CURRENT_USER_ERROR:", error);
@@ -200,7 +210,11 @@ export default function ChatPage() {
 
         const handleConnect = () => {
             console.log("Socket connected:", socket.id);
-            socket.emit("user-online", currentUserId);
+
+            socket.emit("user-online", {
+                userId: currentUserId,
+                showOnlineStatus: showOnlineStatusRef.current,
+            });
         };
 
         const handleNewMessage = (incomingMessage: any) => {
@@ -265,6 +279,37 @@ export default function ChatPage() {
             socket.disconnect();
         };
     }, [socket, currentUserId]);
+
+    useEffect(() => {
+        const handlePreferenceChange = (event: Event) => {
+            const customEvent = event as CustomEvent<{
+                showOnlineStatus: boolean;
+            }>;
+
+            const visible = customEvent.detail.showOnlineStatus;
+
+            setShowOnlineStatus(visible);
+
+            if (currentUserId && socket.connected) {
+                socket.emit("update-online-visibility", {
+                    userId: currentUserId,
+                    visible,
+                });
+            }
+        };
+
+        window.addEventListener(
+            "online-status-preference-changed",
+            handlePreferenceChange
+        );
+
+        return () => {
+            window.removeEventListener(
+                "online-status-preference-changed",
+                handlePreferenceChange
+            );
+        };
+    }, [currentUserId, socket]);
 
     useEffect(() => {
         const fetchConversations = async () => {

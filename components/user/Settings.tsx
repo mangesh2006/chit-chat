@@ -12,6 +12,9 @@ import {
     Check,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { Switch } from "@/components/ui/switch";
+import ChangePasswordForm from "./ChangePassword";
+import LogoutButton from "./LogoutButton";
 
 const settingsSections = [
     {
@@ -27,18 +30,6 @@ const settingsSections = [
         icon: LockKeyhole,
     },
     {
-        id: "chat",
-        title: "Chat",
-        description: "Customize your chats",
-        icon: MessageSquare,
-    },
-    {
-        id: "notifications",
-        title: "Notifications",
-        description: "Message alerts and sounds",
-        icon: Bell,
-    },
-    {
         id: "security",
         title: "Security",
         description: "Manage account security",
@@ -52,6 +43,9 @@ export default function SettingsPage() {
     const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
     const [mounted, setMounted] = useState(false);
 
+    const [showOnlineStatus, setShowOnlineStatus] = useState(true);
+    const [savingPrivacy, setSavingPrivacy] = useState(false);
+
     const active = settingsSections.find(
         (section) => section.id === activeSection
     )!;
@@ -60,6 +54,23 @@ export default function SettingsPage() {
 
     useEffect(() => {
         setMounted(true);
+    }, []);
+
+    useEffect(() => {
+        const loadPrivacy = async () => {
+            try {
+                const res = await fetch("/api/auth/me");
+                const data = await res.json();
+
+                if (data.success) {
+                    setShowOnlineStatus(data.user.showOnlineStatus ?? true);
+                }
+            } catch (error) {
+                console.error("LOAD_PRIVACY_ERROR:", error);
+            }
+        };
+
+        loadPrivacy();
     }, []);
 
     return (
@@ -183,31 +194,60 @@ export default function SettingsPage() {
                             )}
 
                             {activeSection === "privacy" && (
-                                <SettingsPlaceholder
-                                    title="Privacy controls"
-                                    description="Manage who can see your online status, last seen, and read receipts."
-                                />
-                            )}
+                                <div className="divide-y">
+                                    <div className="flex items-center justify-between gap-4 p-5">
+                                        <div>
+                                            <h3 className="font-medium">Show my online status</h3>
+                                            <p className="mt-1 text-sm text-muted-foreground">
+                                                Allow other users to see when you're online.
+                                            </p>
+                                        </div>
 
-                            {activeSection === "chat" && (
-                                <SettingsPlaceholder
-                                    title="Chat preferences"
-                                    description="Configure Enter-to-send and other messaging preferences."
-                                />
-                            )}
+                                        <Switch
+                                            checked={showOnlineStatus}
+                                            disabled={savingPrivacy}
+                                            onCheckedChange={async (checked) => {
+                                                setSavingPrivacy(true);
 
-                            {activeSection === "notifications" && (
-                                <SettingsPlaceholder
-                                    title="Notification preferences"
-                                    description="Configure message notifications, sounds, and previews."
-                                />
+                                                try {
+                                                    const res = await fetch("/api/settings/privacy", {
+                                                        method: "PATCH",
+                                                        headers: { "Content-Type": "application/json" },
+                                                        body: JSON.stringify({ showOnlineStatus: checked }),
+                                                    });
+
+                                                    const data = await res.json();
+
+                                                    if (!res.ok || !data.success) {
+                                                        throw new Error(data.message || "Failed to update privacy");
+                                                    }
+
+                                                    setShowOnlineStatus(checked);
+
+                                                    window.dispatchEvent(
+                                                        new CustomEvent("online-status-preference-changed", {
+                                                            detail: { showOnlineStatus: checked },
+                                                        })
+                                                    );
+                                                } catch (error) {
+                                                    console.error("UPDATE_PRIVACY_ERROR:", error);
+                                                    alert("Could not update online status preference.");
+                                                } finally {
+                                                    setSavingPrivacy(false);
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                </div>
                             )}
 
                             {activeSection === "security" && (
-                                <SettingsPlaceholder
-                                    title="Account security"
-                                    description="Manage active sessions and review your account security options."
-                                />
+                                <div>
+                                    <ChangePasswordForm />
+                                    <div className="px-5 pb-5 sm:px-6 sm:pb-6">
+                                        <LogoutButton />
+                                    </div>
+                                </div>
                             )}
                         </div>
 
