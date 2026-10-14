@@ -30,17 +30,19 @@ export function Footer() {
 
                 <div className="flex items-center gap-4 text-muted-foreground">
                     <a
-                        href="#"
+                        href="https://github.com/mangesh2006"
                         aria-label="GitHub"
                         className="transition-colors hover:text-foreground"
+                        target="__blank"
                     >
                         <FaGithub size={18} />
                     </a>
 
                     <a
-                        href="#"
+                        href="https://www.linkedin.com/in/mangesh-deo-72b469248"
                         aria-label="LinkedIn"
                         className="transition-colors hover:text-foreground"
+                        target="__blank"
                     >
                         <FaLinkedinIn size={18} />
                     </a>
