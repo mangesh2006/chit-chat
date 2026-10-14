@@ -97,7 +97,7 @@ export default function ChatPage() {
     const [searchResults, setSearchResults] = useState<User[]>([]);
     const [searching, setSearching] = useState(false);
 
-    const socket = useMemo(() => io("http://localhost:5000", { autoConnect: false }), [])
+    const socket = useMemo(() => io(`${process.env.BACKEND_URL}`, { autoConnect: false }), [])
 
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [Username, setUsername] = useState<string | null>(null)
