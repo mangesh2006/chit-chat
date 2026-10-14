@@ -1,9 +1,53 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { jwtVerify } from "jose";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3Client, BUCKET_NAME } from "@/lib/s3";
+
+type ConversationWithParticipants = Prisma.ConversationGetPayload<{
+  include: {
+    participants: {
+      include: {
+        user: {
+          select: {
+            id: true;
+            name: true;
+            username: true;
+            avatar: true;
+          };
+        };
+      };
+    };
+  };
+}>;
+
+type ConversationForList = Prisma.ConversationGetPayload<{
+  include: {
+    participants: {
+      include: {
+        user: {
+          select: {
+            id: true;
+            name: true;
+            username: true;
+            avatar: true;
+          };
+        };
+      };
+    };
+    messages: {
+      orderBy: { createdAt: "desc" };
+      take: 1;
+      select: {
+        content: true;
+        createdAt: true;
+        senderId: true;
+      };
+    };
+  };
+}>;
 
 export async function GET(req: Request) {
   try {
@@ -67,15 +111,17 @@ export async function GET(req: Request) {
     });
 
     const result = await Promise.all(
-      conversations.map(async (conversation) => {
+      conversations.map(async (conversation: ConversationForList) => {
         const otherParticipant = conversation.participants.find(
-          (participant) => participant.userId !== userId,
+          (participant: ConversationWithParticipants["participants"][number]) =>
+            participant.userId !== userId,
         );
 
         const otherUser = otherParticipant?.user;
 
         const participant = conversation.participants.find(
-          (p) => p.userId === userId,
+          (p: ConversationWithParticipants["participants"][number]) =>
+            p.userId === userId,
         );
 
         const lastMessage = await prisma.message.findFirst({
@@ -268,7 +314,8 @@ export async function POST(req: Request) {
 
     if (existingConversation) {
       const otherParticipant = existingConversation.participants.find(
-        (participant) => participant.userId !== userId,
+        (participant: ConversationWithParticipants["participants"][number]) =>
+          participant.userId !== userId,
       );
 
       await prisma.conversationParticipant.update({
@@ -326,7 +373,8 @@ export async function POST(req: Request) {
     });
 
     const otherParticipant = conversation.participants.find(
-      (participant) => participant.userId !== userId,
+      (participant: ConversationWithParticipants["participants"][number]) =>
+        participant.userId !== userId,
     );
 
     return NextResponse.json(

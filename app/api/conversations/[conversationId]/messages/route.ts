@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { jwtVerify } from "jose";
 import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -109,22 +110,46 @@ export async function GET(
     });
 
     const messagesWithUrls = await Promise.all(
-      messages.map(async (message) => ({
-        ...message,
-        attachments: await Promise.all(
-          message.attachments.map(async (attachment) => ({
-            ...attachment,
-            url: await getSignedUrl(
-              s3Client,
-              new GetObjectCommand({
-                Bucket: BUCKET_NAME,
-                Key: attachment.url,
+      messages.map(
+        async (
+          message: Prisma.MessageGetPayload<{
+            include: {
+              sender: {
+                select: {
+                  id: true;
+                  name: true;
+                  username: true;
+                  avatar: true;
+                };
+              };
+              attachments: true;
+            };
+          }>,
+        ) => ({
+          ...message,
+          attachments: await Promise.all(
+            message.attachments.map(
+              async (
+                attachment: Prisma.MessageGetPayload<{
+                  include: {
+                    attachments: true;
+                  };
+                }>["attachments"][number],
+              ) => ({
+                ...attachment,
+                url: await getSignedUrl(
+                  s3Client,
+                  new GetObjectCommand({
+                    Bucket: BUCKET_NAME,
+                    Key: attachment.url,
+                  }),
+                  { expiresIn: 3600 },
+                ),
               }),
-              { expiresIn: 3600 },
             ),
-          })),
-        ),
-      })),
+          ),
+        }),
+      ),
     );
 
     return NextResponse.json({
@@ -275,17 +300,25 @@ export async function POST(
     const messageWithUrls = {
       ...message,
       attachments: await Promise.all(
-        message.attachments.map(async (attachment) => ({
-          ...attachment,
-          url: await getSignedUrl(
-            s3Client,
-            new GetObjectCommand({
-              Bucket: BUCKET_NAME,
-              Key: attachment.url,
-            }),
-            { expiresIn: 3600 },
-          ),
-        })),
+        message.attachments.map(
+          async (
+            attachment: Prisma.MessageGetPayload<{
+              include: {
+                attachments: true;
+              };
+            }>["attachments"][number],
+          ) => ({
+            ...attachment,
+            url: await getSignedUrl(
+              s3Client,
+              new GetObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: attachment.url,
+              }),
+              { expiresIn: 3600 },
+            ),
+          }),
+        ),
       ),
     };
 

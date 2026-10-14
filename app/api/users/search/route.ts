@@ -4,6 +4,7 @@ import { jwtVerify } from "jose";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3Client, BUCKET_NAME } from "@/lib/s3";
+import type { Prisma } from "@prisma/client";
 
 export async function GET(req: Request) {
   try {
@@ -71,23 +72,34 @@ export async function GET(req: Request) {
     });
 
     const usersWithAvatarUrls = await Promise.all(
-      users.map(async (user) => {
-        const avatarUrl = user.avatar
-          ? await getSignedUrl(
-              s3Client,
-              new GetObjectCommand({
-                Bucket: BUCKET_NAME,
-                Key: user.avatar,
-              }),
-              { expiresIn: 3600 },
-            )
-          : null;
+      users.map(
+        async (
+          user: Prisma.UserGetPayload<{
+            select: {
+              id: true;
+              name: true;
+              username: true;
+              avatar: true;
+            };
+          }>,
+        ) => {
+          const avatarUrl = user.avatar
+            ? await getSignedUrl(
+                s3Client,
+                new GetObjectCommand({
+                  Bucket: BUCKET_NAME,
+                  Key: user.avatar,
+                }),
+                { expiresIn: 3600 },
+              )
+            : null;
 
-        return {
-          ...user,
-          avatar: avatarUrl,
-        };
-      }),
+          return {
+            ...user,
+            avatar: avatarUrl,
+          };
+        },
+      ),
     );
 
     return NextResponse.json({
