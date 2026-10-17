@@ -15,7 +15,9 @@ import {
     CircleMinus,
     Info,
     ExternalLink,
-    Images
+    Images,
+    ChevronDown,
+    Copy
 } from "lucide-react";
 
 import React, { useEffect, useMemo, useState, useRef } from "react";
@@ -97,7 +99,7 @@ export default function ChatPage() {
     const [searchResults, setSearchResults] = useState<User[]>([]);
     const [searching, setSearching] = useState(false);
 
-    const socket = useMemo(() => io(process.env.NEXT_PUBLIC_BACKEND_URL!, { autoConnect: false }), [])
+    const socket = useMemo(() => io("http://localhost:5000", { autoConnect: false }), [])
 
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [Username, setUsername] = useState<string | null>(null)
@@ -1143,12 +1145,12 @@ export default function ChatPage() {
                                                     return (
                                                         <div
                                                             key={msg.id}
-                                                            className={`flex ${isMine ? "justify-end" : "justify-start"
+                                                            className={`flex items-center gap-3 ${isMine ? "justify-end" : "justify-start"
                                                                 }`}
                                                         >
                                                             <div className="max-w-[80%] sm:max-w-[65%] mb-2">
                                                                 <div
-                                                                    className={`rounded-2xl px-4 py-2.5 text-md ${isMine
+                                                                    className={`rounded-2xl px-4 py-2.5 text-md group ${isMine
                                                                         ? "rounded-br-md bg-blue-600 text-white"
                                                                         : "rounded-bl-md bg-white text-gray-900 shadow-sm"
                                                                         }`}
@@ -1199,8 +1201,23 @@ export default function ChatPage() {
                                                                         {msg.content}
                                                                     </p>
 
-                                                                    <p className="mt-1 text-end text-[12px] opacity-70">
+                                                                    <p className="mt-1 text-end text-[12px] opacity-70 flex items-center justify-between w-full">
                                                                         {msg.time}
+
+                                                                        <DropdownMenu>
+                                                                            <DropdownMenuTrigger>
+                                                                                <span className="group-hover:opacity-100 opacity-0 transition-opacity duration-300">
+                                                                                    <ChevronDown />
+                                                                                </span>
+                                                                            </DropdownMenuTrigger>
+
+                                                                            <DropdownMenuContent>
+                                                                                <DropdownMenuItem className={"flex items-center gap-2"} onClick={() => handleCopyMessage(msg.content)}>
+                                                                                    <Copy />
+                                                                                    Copy
+                                                                                </DropdownMenuItem>
+                                                                            </DropdownMenuContent>
+                                                                        </DropdownMenu>
                                                                     </p>
                                                                 </div>
                                                             </div>
@@ -1352,7 +1369,7 @@ export default function ChatPage() {
                                                 }
                                             }}
                                             placeholder="Type a message..."
-                                            className="min-h-10 max-h-24 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2.5 leading-5 shadow-none focus-visible:ring-0"
+                                            className="min-h-10 max-h-24 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2.5 leading-5 shadow-none focus-visible:ring-0 dark:bg-background"
                                         />
 
                                         <Button
