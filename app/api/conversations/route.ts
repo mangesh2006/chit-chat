@@ -112,10 +112,15 @@ export async function GET(req: Request) {
 
     const result = await Promise.all(
       conversations.map(async (conversation: ConversationForList) => {
-        const otherParticipant = conversation.participants.find(
-          (participant: ConversationWithParticipants["participants"][number]) =>
-            participant.userId !== userId,
-        );
+        const isGroup = conversation.isGroup;
+
+        const otherParticipant = isGroup
+          ? undefined
+          : conversation.participants.find(
+              (
+                participant: ConversationWithParticipants["participants"][number],
+              ) => participant.userId !== userId,
+            );
 
         const otherUser = otherParticipant?.user;
 
@@ -141,12 +146,14 @@ export async function GET(req: Request) {
           },
         });
 
-        const avatarUrl = otherUser?.avatar
+        const avatarKey = isGroup ? conversation.avatarKey : otherUser?.avatar;
+
+        const avatarUrl = avatarKey
           ? await getSignedUrl(
               s3Client,
               new GetObjectCommand({
                 Bucket: BUCKET_NAME,
-                Key: otherUser.avatar,
+                Key: avatarKey,
               }),
               { expiresIn: 3600 },
             )
@@ -154,9 +161,12 @@ export async function GET(req: Request) {
 
         return {
           id: conversation.id,
-          name: otherUser?.name ?? "Unknown",
-          userId: otherUser?.id,
-          username: otherUser?.username ?? "",
+          isGroup,
+          name: isGroup
+            ? (conversation.name ?? "Unnamed group")
+            : (otherUser?.name ?? "Unknown"),
+          userId: isGroup ? undefined : otherUser?.id,
+          username: isGroup ? "" : (otherUser?.username ?? ""),
           avatar: avatarUrl,
           lastMessage: lastMessage?.content ?? "",
           lastMessageTime: lastMessage
@@ -165,6 +175,16 @@ export async function GET(req: Request) {
                 minute: "2-digit",
               })
             : "",
+          members: isGroup
+            ? conversation.participants
+                .filter((p) => p.deletedAt === null)
+                .map((p) => ({
+                  id: p.user.id,
+                  name: p.user.name,
+                  username: p.user.username,
+                  role: p.role,
+                }))
+            : [],
         };
       }),
     );
@@ -272,6 +292,7 @@ export async function POST(req: Request) {
 
     const existingConversation = await prisma.conversation.findFirst({
       where: {
+        isGroup: false,
         participants: {
           every: {
             userId: {
@@ -334,6 +355,7 @@ export async function POST(req: Request) {
         success: true,
         conversation: {
           id: existingConversation.id,
+          isGroup: false,
           name: otherParticipant?.user.name ?? "Unknown",
           userId: otherParticipant?.user.id,
           username: otherParticipant?.user.username ?? "",
@@ -345,6 +367,7 @@ export async function POST(req: Request) {
 
     const conversation = await prisma.conversation.create({
       data: {
+        isGroup: false,
         participants: {
           create: [
             {
@@ -382,7 +405,9 @@ export async function POST(req: Request) {
         success: true,
         conversation: {
           id: conversation.id,
+          isGroup: false,
           name: otherParticipant?.user.name ?? "Unknown",
+          userId: otherParticipant?.user.id,
           username: otherParticipant?.user.username ?? "",
           avatar: otherParticipant?.user.avatar ?? null,
         },

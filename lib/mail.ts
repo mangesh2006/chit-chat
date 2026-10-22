@@ -19,13 +19,7 @@ export async function sendVerificationEmail({
   name: string;
   token: string;
 }) {
-  const appUrl = process.env.APP_URL;
-
-  if (!appUrl) {
-    throw new Error("APP_URL is not configured");
-  }
-
-  const verificationUrl = `${appUrl}/verify-email?token=${token}`;
+  const verificationUrl = `http://localhost:3000/verify-email?token=${token}`;
 
   await transporter.sendMail({
     from: `"ChitChat" <${process.env.SMTP_USER}>`,

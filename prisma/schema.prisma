@@ -37,6 +37,9 @@ model EmailVerificationToken {
 
 model Conversation {
   id        String   @id @default(cuid())
+  name      String?
+  isGroup   Boolean  @default(false)
+  avatarKey String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -58,6 +61,8 @@ model ConversationParticipant {
 
   deletedAt DateTime?
 
+  role String @default("MEMBER")
+
   @@unique([conversationId, userId])
   @@index([userId])
   @@index([conversationId])
@@ -68,6 +73,7 @@ model Message {
   conversationId String
   senderId       String
   content        String?
+  type MessageType @default(USER)
 
   createdAt DateTime @default(now())
 
@@ -101,4 +107,9 @@ enum AttachmentType {
   IMAGE
   VIDEO
   DOCUMENT
+}
+
+enum MessageType {
+  USER
+  SYSTEM
 }
