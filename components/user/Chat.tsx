@@ -2311,9 +2311,7 @@ export default function ChatPage() {
                                                 </span>
 
                                                 <span className="text-xs text-muted-foreground">
-                                                    {typingUserIds.length === 1
-                                                        ? "Typing..."
-                                                        : `${typingUserIds.length} people are typing...`}
+                                                    {typingUserIds.length === 1 && "Typing"}
                                                 </span>
                                             </div>
                                         </div>

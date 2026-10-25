@@ -6,10 +6,12 @@ import { s3Client } from "@/lib/s3";
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string; messageId: string }> },
+  {
+    params,
+  }: { params: Promise<{ conversationId: string; messageId: string }> },
 ) {
   try {
-    const { id: conversationId, messageId } = await params;
+    const { conversationId, messageId } = await params;
     const userId = await getAuthenticatedUser(req);
 
     if (!userId) {
@@ -95,10 +97,12 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; messageId: string }> },
+  {
+    params,
+  }: { params: Promise<{ conversationId: string; messageId: string }> },
 ) {
   try {
-    const { id: conversationId, messageId } = await params;
+    const { conversationId, messageId } = await params;
 
     const userId = await getAuthenticatedUser(request);
 
