@@ -27,7 +27,7 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
 
-async function getAuthenticatedUser(req: Request) {
+export async function getAuthenticatedUser(req: Request) {
   const cookie = req.headers.get("cookie");
 
   const token = cookie

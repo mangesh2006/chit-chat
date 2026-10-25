@@ -19,7 +19,6 @@ import {
     ChevronDown,
     Copy,
     MessageSquare,
-    UserGroup,
     UserRoundPlus,
     LogOut,
     Camera,
@@ -49,6 +48,14 @@ import {
     SheetHeader,
     SheetTitle,
 } from "@/components/ui/sheet";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+    DialogDescription,
+} from "@/components/ui/dialog";
 
 import { io } from "socket.io-client"
 import { Textarea } from "@/components/ui/textarea";
@@ -131,7 +138,7 @@ export default function ChatPage() {
     const [searchResults, setSearchResults] = useState<User[]>([]);
     const [searching, setSearching] = useState(false);
 
-    const socket = useMemo(() => io("https://server.chitchat-backend.publicvm.com", { autoConnect: false }), [])
+    const socket = useMemo(() => io("http://localhost:5000", { autoConnect: false }), [])
 
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [Username, setUsername] = useState<string | null>(null)
@@ -170,6 +177,18 @@ export default function ChatPage() {
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
 
+    const [editingMessageId, setEditingMessageId] =
+        useState<string | null>(null);
+
+    const [editContent, setEditContent] = useState("");
+    const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+    const [editDialogOpen, setEditDialogOpen] = useState(false);
+    const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+
+    const [deletingMessageId, setDeletingMessageId] =
+        useState<string | null>(null);
+
     const GroupfileInputRef = useRef<HTMLInputElement>(null);
     const [groupAvatarFile, setGroupAvatarFile] =
         useState<File | null>(null);
@@ -186,6 +205,97 @@ export default function ChatPage() {
     const [activeSidebarTab, setActiveSidebarTab] = useState<
         "chats" | "groups"
     >("chats");
+
+    const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+        null,
+    );
+    const isTypingRef = useRef(false);
+
+    const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
+
+    const handleTyping = () => {
+        if (!selectedConversation) return;
+
+        console.log("EMITTING TYPING:", selectedConversation?.id);
+
+        if (!isTypingRef.current) {
+            isTypingRef.current = true;
+
+            socket.emit("typing", {
+                conversationId: selectedConversation.id,
+            });
+        }
+
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+        }
+
+        typingTimeoutRef.current = setTimeout(() => {
+            socket.emit("stop-typing", {
+                conversationId: selectedConversation.id,
+            });
+
+            isTypingRef.current = false;
+            typingTimeoutRef.current = null;
+        }, 1500);
+    };
+
+    useEffect(() => {
+        if (!selectedConversation) {
+            setTypingUserIds([]);
+            return;
+        }
+
+        const conversationId = selectedConversation.id;
+
+        const handleUserTyping = (data: {
+            conversationId: string;
+            userId: string;
+        }) => {
+            if (
+                data.conversationId !== conversationId ||
+                data.userId === currentUserId
+            ) {
+                return;
+            }
+
+            setTypingUserIds((previous) =>
+                previous.includes(data.userId)
+                    ? previous
+                    : [...previous, data.userId],
+            );
+        };
+
+        const handleUserStopTyping = (data: {
+            conversationId: string;
+            userId: string;
+        }) => {
+            console.log("RECEIVED USER TYPING:", data);
+
+            if (data.conversationId !== conversationId) return;
+
+            setTypingUserIds((previous) =>
+                previous.filter((id) => id !== data.userId),
+            );
+        };
+
+        socket.on("user-typing", handleUserTyping);
+        socket.on("user-stop-typing", handleUserStopTyping);
+
+        return () => {
+            socket.off("user-typing", handleUserTyping);
+            socket.off("user-stop-typing", handleUserStopTyping);
+            setTypingUserIds([]);
+        };
+    }, [socket, selectedConversation?.id, currentUserId]);
+
+    useEffect(() => {
+        return () => {
+            if (typingTimeoutRef.current) {
+                clearTimeout(typingTimeoutRef.current);
+            }
+        };
+    }, []);
 
     const filteredConversations = conversations.filter((conversation) =>
         activeSidebarTab === "chats"
@@ -619,6 +729,19 @@ export default function ChatPage() {
                 }
             }
 
+            if (typingTimeoutRef.current) {
+                clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = null;
+            }
+
+            if (isTypingRef.current && selectedConversation) {
+                socket.emit("stop-typing", {
+                    conversationId: selectedConversation.id,
+                });
+
+                isTypingRef.current = false;
+            }
+
             socket.emit("send-message", {
                 message: {
                     ...data.message,
@@ -922,13 +1045,154 @@ export default function ChatPage() {
         }
     };
 
-    const handleEditMessage = async () => {
+    const handleEditMessage = async (msg: Message) => {
+        if (
+            msg.senderId !== currentUserId ||
+            msg.type === "SYSTEM" ||
+            !msg.content.trim()
+        ) {
+            return;
+        }
 
+        setEditingMessage(msg);
+        setEditingMessageId(msg.id);
+        setEditContent(msg.content);
+        setEditDialogOpen(true);
     }
 
-    const handleDeleteMessage = async () => {
+    const handleSaveEdit = async (msg: Message) => {
+        if (!selectedConversation || !editContent.trim()) return;
 
-    }
+        setIsSavingEdit(true);
+
+        try {
+            const response = await fetch(
+                `/api/conversations/${selectedConversation.id}/messages/${msg.id}`,
+                {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: editContent.trim() }),
+                },
+            );
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || "Failed to edit message");
+            }
+
+            setMessages((previous) =>
+                previous.map((message) =>
+                    message.id === msg.id
+                        ? { ...message, content: data.message.content }
+                        : message,
+                ),
+            );
+
+            socket.emit("message-edited", {
+                conversationId: selectedConversation.id,
+                message: data.message,
+            });
+
+            setEditDialogOpen(false);
+            setEditingMessage(null);
+            setEditContent("");
+        } catch (error) {
+            console.error("EDIT_MESSAGE_ERROR:", error);
+        } finally {
+            setIsSavingEdit(false);
+        }
+    };
+
+    useEffect(() => {
+        const handleMessageEdited = (updatedMessage: Message) => {
+            setMessages((previous) =>
+                previous.map((message) =>
+                    message.id === updatedMessage.id
+                        ? { ...message, content: updatedMessage.content }
+                        : message,
+                ),
+            );
+        };
+
+        socket.on("message-edited", handleMessageEdited);
+
+        return () => {
+            socket.off("message-edited", handleMessageEdited);
+        };
+    }, [socket]);
+
+    const handleDeleteMessage = async (msg: Message) => {
+        if (
+            !selectedConversation ||
+            msg.senderId !== currentUserId ||
+            msg.type === "SYSTEM"
+        ) {
+            return;
+        }
+
+        setDeletingMessageId(msg.id);
+
+        try {
+            const response = await fetch(
+                `/api/conversations/${selectedConversation.id}/messages/${msg.id}`,
+                { method: "DELETE" }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || "Failed to delete message");
+            }
+
+            setMessages((previous) =>
+                previous.map((message) =>
+                    message.id === msg.id
+                        ? {
+                            ...message,
+                            content: "This message was deleted",
+                            attachments: [],
+                        }
+                        : message
+                )
+            );
+
+            socket.emit("message-deleted", {
+                conversationId: selectedConversation.id,
+                messageId: msg.id,
+            });
+        } catch (error) {
+            console.error("DELETE_MESSAGE_ERROR:", error);
+        } finally {
+            setDeletingMessageId(null);
+        }
+    };
+
+    useEffect(() => {
+        const handleMessageDeleted = ({
+            messageId,
+        }: {
+            messageId: string;
+        }) => {
+            setMessages((previous) =>
+                previous.map((message) =>
+                    message.id === messageId
+                        ? {
+                            ...message,
+                            content: "This message was deleted",
+                            attachments: [],
+                        }
+                        : message
+                )
+            );
+        };
+
+        socket.on("message-deleted", handleMessageDeleted);
+
+        return () => {
+            socket.off("message-deleted", handleMessageDeleted);
+        };
+    }, [socket])
 
     return (
         <main className="h-screen overflow-hidden bg-background">
@@ -1075,6 +1339,10 @@ export default function ChatPage() {
                                         <p className="text-sm font-medium">Group photo</p>
                                         <p className="mt-1 text-xs text-muted-foreground">
                                             Add a photo to make your group recognizable.
+                                        </p>
+
+                                        <p className={`mt-1 text-xs ${error ? "text-red-600" : "text-green-600"}`}>
+                                            {error ? error : success}
                                         </p>
                                     </div>
                                 </div>
@@ -1881,7 +2149,7 @@ export default function ChatPage() {
                                                                     </div>
                                                                 </div>
                                                             ) : (
-                                                                <div className={`w-fit group ${msg.attachments?.some((a) => a.type === "IMAGE")
+                                                                <div className={`w-fit group  ${msg.attachments?.some((a) => a.type === "IMAGE")
                                                                     ? "max-w-[50%] sm:max-w-[40%]"
                                                                     : "max-w-[80%] sm:max-w-[65%] sm:w-[12%]"
                                                                     }`}>
@@ -1902,59 +2170,67 @@ export default function ChatPage() {
                                                                             </p>
                                                                         )}
 
-                                                                        {msg.attachments?.map((attachment) => (
-                                                                            <div key={attachment.id} className="mb-2">
-                                                                                {attachment.type === "IMAGE" && (
-                                                                                    <a
-                                                                                        href={attachment.url}
-                                                                                        target="_blank"
-                                                                                        rel="noreferrer"
-                                                                                        className="block"
-                                                                                    >
-                                                                                        <img
-                                                                                            src={attachment.url}
-                                                                                            alt={attachment.name || "Image attachment"}
-                                                                                            className="block h-auto max-h-110 w-full rounded-xl object-cover"
-                                                                                        />
-                                                                                    </a>
-                                                                                )}
-
-                                                                                {attachment.type === "VIDEO" && (
-                                                                                    <video
-                                                                                        src={attachment.url}
-                                                                                        controls
-                                                                                        preload="metadata"
-                                                                                        className="max-h-72 max-w-full w-60 rounded-xl"
-                                                                                    />
-                                                                                )}
-
-                                                                                {attachment.type === "DOCUMENT" && (
-                                                                                    <a
-                                                                                        href={attachment.url}
-                                                                                        target="_blank"
-                                                                                        rel="noreferrer"
-                                                                                        className={`flex items-center gap-3 rounded-xl border p-3 ${isMine
-                                                                                            ? "border-blue-400/40 bg-blue-700/40"
-                                                                                            : "border-gray-200 bg-gray-50"
-                                                                                            }`}
-                                                                                    >
-                                                                                        <FileText className="h-5 w-5 shrink-0" />
-                                                                                        <span className="break-all text-sm">
-                                                                                            {attachment.name || "Open document"}
-                                                                                        </span>
-                                                                                    </a>
-                                                                                )}
-                                                                            </div>
-                                                                        ))}
-
-                                                                        {msg.content && (
-                                                                            <p className="whitespace-pre-wrap wrap-break-words text-sm leading-relaxed">
-                                                                                {msg.content}
+                                                                        {msg.content === "This message was deleted" ? (
+                                                                            <p className="py-1 text-sm italic text-muted-foreground">
+                                                                                This message was deleted
                                                                             </p>
+                                                                        ) : (
+                                                                            <>
+                                                                                {msg.attachments?.map((attachment) => (
+                                                                                    <div key={attachment.id} className="mb-2">
+                                                                                        {attachment.type === "IMAGE" && (
+                                                                                            <a
+                                                                                                href={attachment.url}
+                                                                                                target="_blank"
+                                                                                                rel="noreferrer"
+                                                                                                className="block"
+                                                                                            >
+                                                                                                <img
+                                                                                                    src={attachment.url}
+                                                                                                    alt={attachment.name || "Image attachment"}
+                                                                                                    className="block h-auto max-h-110 w-full rounded-xl object-cover"
+                                                                                                />
+                                                                                            </a>
+                                                                                        )}
+
+                                                                                        {attachment.type === "VIDEO" && (
+                                                                                            <video
+                                                                                                src={attachment.url}
+                                                                                                controls
+                                                                                                preload="metadata"
+                                                                                                className="max-h-72 w-60 max-w-full rounded-xl"
+                                                                                            />
+                                                                                        )}
+
+                                                                                        {attachment.type === "DOCUMENT" && (
+                                                                                            <a
+                                                                                                href={attachment.url}
+                                                                                                target="_blank"
+                                                                                                rel="noreferrer"
+                                                                                                className={`flex items-center gap-3 rounded-xl border p-3 ${isMine
+                                                                                                    ? "border-blue-400/40 bg-blue-700/40"
+                                                                                                    : "border-gray-200 bg-gray-50"
+                                                                                                    }`}
+                                                                                            >
+                                                                                                <FileText className="h-5 w-5 shrink-0" />
+                                                                                                <span className="break-all text-sm">
+                                                                                                    {attachment.name || "Open document"}
+                                                                                                </span>
+                                                                                            </a>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ))}
+
+                                                                                {msg.content && (
+                                                                                    <p className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed">
+                                                                                        {msg.content}
+                                                                                    </p>
+                                                                                )}
+                                                                            </>
                                                                         )}
 
                                                                         <div
-                                                                            className={`mt-2 flex items-center justify-end gap-2 border-t pt-1.5 ${isMine
+                                                                            className={`mt-2 flex items-center justify-between w-full gap-2 border-t pt-1.5 ${isMine
                                                                                 ? "border-blue-400/40 text-blue-100"
                                                                                 : "border-gray-100 text-gray-400"
                                                                                 }`}
@@ -1988,9 +2264,10 @@ export default function ChatPage() {
                                                                                     </DropdownMenuItem>
 
                                                                                     <DropdownMenuItem
-                                                                                        className="flex items-center gap-2"
+                                                                                        className={`flex items-center gap-2 ${isMine ? "flex" : "hidden"}`}
+                                                                                        disabled={!isMine}
                                                                                         onClick={() =>
-                                                                                            handleEditMessage
+                                                                                            handleEditMessage(msg)
                                                                                         }
                                                                                     >
                                                                                         <Pencil className="h-4 w-4" />
@@ -1998,9 +2275,9 @@ export default function ChatPage() {
                                                                                     </DropdownMenuItem>
 
                                                                                     <DropdownMenuItem
-                                                                                        className="flex items-center gap-2 text-red-600 transition duration-200 hover:bg-red-400"
+                                                                                        className={`flex items-center gap-2 text-red-600 transition duration-200 hover:bg-red-400 ${isMine ? "flex" : "hidden"}`}
                                                                                         onClick={() =>
-                                                                                            handleDeleteMessage
+                                                                                            handleDeleteMessage(msg)
                                                                                         }
                                                                                     >
                                                                                         <Trash2 className="h-4 w-4" />
@@ -2019,6 +2296,85 @@ export default function ChatPage() {
                                             )}
                                     </div>
                                 </div>
+
+                                <div
+                                    aria-live="polite"
+                                    className="flex h-10 shrink-0 items-center px-4 sm:px-6"
+                                >
+                                    {typingUserIds.length > 0 && (
+                                        <div className="flex items-center gap-2 animate-in fade-in duration-200">
+                                            <div className="flex items-center gap-1 rounded-full border bg-background/90 px-3 py-2 shadow-sm">
+                                                <span className="flex items-center gap-1">
+                                                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+                                                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+                                                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                                                </span>
+
+                                                <span className="text-xs text-muted-foreground">
+                                                    {typingUserIds.length === 1
+                                                        ? "Typing..."
+                                                        : `${typingUserIds.length} people are typing...`}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <Dialog
+                                    open={editDialogOpen}
+                                    onOpenChange={(open) => {
+                                        setEditDialogOpen(open);
+
+                                        if (!open && !isSavingEdit) {
+                                            setEditingMessage(null);
+                                            setEditContent("");
+                                        }
+                                    }}
+                                >
+                                    <DialogContent className="w-[calc(100%-2rem)] max-w-lg">
+                                        <DialogHeader>
+                                            <DialogTitle>Edit message</DialogTitle>
+                                            <DialogDescription>
+                                                Make changes to your message before saving.
+                                            </DialogDescription>
+                                        </DialogHeader>
+
+                                        <Textarea
+                                            value={editContent}
+                                            onChange={(e) => setEditContent(e.target.value)}
+                                            placeholder="Write your message..."
+                                            rows={5}
+                                            autoFocus
+                                            className="max-h-60 resize-y"
+                                            disabled={isSavingEdit}
+                                        />
+
+                                        <DialogFooter>
+                                            <Button
+                                                variant="outline"
+                                                disabled={isSavingEdit}
+                                                onClick={() => setEditDialogOpen(false)}
+                                            >
+                                                Cancel
+                                            </Button>
+
+                                            <Button
+                                                disabled={
+                                                    isSavingEdit ||
+                                                    !editContent.trim() ||
+                                                    editContent.trim() === editingMessage?.content.trim()
+                                                }
+                                                onClick={() => {
+                                                    if (editingMessage) {
+                                                        handleSaveEdit(editingMessage);
+                                                    }
+                                                }}
+                                            >
+                                                {isSavingEdit ? "Saving..." : "Save changes"}
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
 
                                 {selectedFile && (
                                     <div
@@ -2153,7 +2509,10 @@ export default function ChatPage() {
 
                                         <Textarea
                                             value={message}
-                                            onChange={(e) => setMessage(e.target.value)}
+                                            onChange={(e) => {
+                                                setMessage(e.target.value)
+                                                handleTyping()
+                                            }}
                                             onKeyDown={(e) => {
                                                 if (e.key === "Enter" && !e.shiftKey) {
                                                     e.preventDefault();
@@ -2172,6 +2531,12 @@ export default function ChatPage() {
                                                 isUploading ||
                                                 (!message.trim() && !selectedFile)
                                             }
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    sendMessage();
+                                                }
+                                            }}
                                             onClick={sendMessage}
                                         >
                                             {isUploading ? (
