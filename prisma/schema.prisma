@@ -96,6 +96,7 @@ model MessageAttachment {
   name     String?
   size     Int?
   mimeType String?
+  duration Int?
 
   createdAt DateTime @default(now())
 
@@ -107,6 +108,7 @@ model MessageAttachment {
 enum AttachmentType {
   IMAGE
   VIDEO
+  AUDIO
   DOCUMENT
 }
 

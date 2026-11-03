@@ -26,7 +26,8 @@ import {
     UsersRound,
     Search,
     CheckCircle2,
-    Pencil
+    Pencil,
+    Mic
 } from "lucide-react";
 
 import React, { useEffect, useMemo, useState, useRef } from "react";
@@ -65,6 +66,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Label } from "../ui/label";
+import VoiceRecorder from "./VoiceRecorder";
 
 type GroupMember = {
     id: string;
@@ -91,11 +93,12 @@ type Conversation = {
 
 type MessageAttachment = {
     id: string;
-    type: "IMAGE" | "VIDEO" | "DOCUMENT";
+    type: "IMAGE" | "VIDEO" | "DOCUMENT" | "AUDIO";
     url: string;
     name: string | null;
     size: number | null;
     mimeType: string | null;
+    duration?: number | null;
 };
 
 type Message = {
@@ -166,6 +169,12 @@ export default function ChatPage() {
 
     const [infoOpen, setInfoOpen] = useState(false);
 
+    const [addMemberOpen, setAddMemberOpen] = useState(false);
+    const [memberSearch, setMemberSearch] = useState("");
+    const [selectedMembersToAdd, setSelectedMembersToAdd] = useState<User[]>([]);
+    const [addingMember, setAddingMember] = useState(false);
+    const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+
     const [showOnlineStatus, setShowOnlineStatus] = useState(true);
 
     const showOnlineStatusRef = useRef(true);
@@ -212,6 +221,8 @@ export default function ChatPage() {
     const isTypingRef = useRef(false);
 
     const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
+
+    const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
 
     const handleTyping = () => {
         if (!selectedConversation) return;
@@ -762,6 +773,69 @@ export default function ChatPage() {
         }
     };
 
+    const sendVoiceMessage = async (file: File, duration: number) => {
+        if (!selectedConversation || !currentUserId) {
+            throw new Error("Select a conversation first.");
+        }
+
+        const formData = new FormData();
+
+        formData.append("content", "");
+        formData.append("file", file);
+        formData.append("type", "VOICE");
+        formData.append("duration", String(duration));
+
+        const conversationId = selectedConversation.id;
+
+        const response = await fetch(
+            `/api/conversations/${conversationId}/messages`,
+            {
+                method: "POST",
+                body: formData,
+            }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || "Failed to send voice message.");
+        }
+
+        const savedMessage: Message = {
+            ...data.message,
+            content: data.message.content ?? "",
+            time: new Date(data.message.createdAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+            }),
+            attachments: data.message.attachments ?? [],
+        };
+
+        setMessages((prev) => [...prev, savedMessage]);
+
+        setConversations((prev) =>
+            prev.map((conversation) =>
+                conversation.id === conversationId
+                    ? {
+                        ...conversation,
+                        lastMessage: "🎤 Voice message",
+                        lastMessageTime: savedMessage.time,
+                    }
+                    : conversation
+            )
+        );
+
+        socket.emit("send-message", {
+            message: {
+                ...data.message,
+                conversationId,
+            },
+            conversationId,
+        });
+
+        setShowVoiceRecorder(false);
+    };
+
     const handleUserClick = async (user: User) => {
         const res = await fetch("/api/conversations", {
             method: "POST",
@@ -961,6 +1035,12 @@ export default function ChatPage() {
 
         setUsersSearchQuery("");
     }
+
+    const currentMember = selectedConversation?.members?.find(
+        (member) => member.id === currentUserId
+    );
+
+    const isGroupAdmin = currentMember?.role === "ADMIN";
 
     const handleCreateGroup = async () => {
         const name = GroupName.trim();
@@ -1193,6 +1273,208 @@ export default function ChatPage() {
             socket.off("message-deleted", handleMessageDeleted);
         };
     }, [socket])
+
+    const handleRemoveMember = async (userId: string) => {
+        if (
+            !selectedConversation ||
+            !selectedConversation.isGroup ||
+            removingMemberId
+        ) {
+            return;
+        }
+
+        const conversationId = selectedConversation.id;
+
+        try {
+            setRemovingMemberId(userId);
+            setError("");
+            setSuccess("");
+
+            const response = await fetch(
+                `/api/conversations/${conversationId}/members/${userId}`,
+                {
+                    method: "DELETE",
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || "Failed to remove member.");
+            }
+
+            const updateConversation = (conversation: Conversation) =>
+                conversation.id !== conversationId
+                    ? conversation
+                    : {
+                        ...conversation,
+                        members: (conversation.members ?? []).filter(
+                            (member) => member.id !== userId
+                        ),
+                    };
+
+            setConversations((prev) => prev.map(updateConversation));
+
+            setSelectedConversation((prev) =>
+                prev ? updateConversation(prev) : prev
+            );
+
+            setSuccess("Member removed successfully.");
+        } catch (error) {
+            console.error("REMOVE_GROUP_MEMBER_ERROR:", error);
+
+            setError(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to remove group member."
+            );
+        } finally {
+            setRemovingMemberId(null);
+        }
+    };
+
+    const handleAddMember = async () => {
+        if (
+            !selectedConversation ||
+            !selectedConversation.isGroup ||
+            selectedMembersToAdd.length === 0 ||
+            addingMember
+        ) {
+            return;
+        }
+
+        const conversationId = selectedConversation.id;
+        const addedMembers: GroupMember[] = [];
+
+        try {
+            setAddingMember(true);
+            setError("");
+            setSuccess("");
+
+            for (const user of selectedMembersToAdd) {
+                const response = await fetch(
+                    `/api/conversations/${conversationId}/members`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            userId: user.id,
+                        }),
+                    }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(
+                        data.message || `Failed to add ${user.name}.`
+                    );
+                }
+
+                addedMembers.push({
+                    id: user.id,
+                    name: user.name,
+                    username: user.username,
+                    role: "MEMBER",
+                });
+            }
+
+            setSuccess("Members added successfully.");
+            setSelectedMembersToAdd([]);
+            setMemberSearch("");
+            setAddMemberOpen(false);
+        } catch (error) {
+            console.error("ADD_GROUP_MEMBERS_ERROR:", error);
+
+            setError(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to add group members."
+            );
+        } finally {
+            if (addedMembers.length > 0) {
+                const updateConversation = (conversation: Conversation) =>
+                    conversation.id !== conversationId
+                        ? conversation
+                        : {
+                            ...conversation,
+                            members: [
+                                ...(conversation.members ?? []),
+                                ...addedMembers.filter(
+                                    (added) =>
+                                        !conversation.members?.some(
+                                            (member) => member.id === added.id
+                                        )
+                                ),
+                            ],
+                        };
+
+                setConversations((prev) => prev.map(updateConversation));
+
+                setSelectedConversation((prev) =>
+                    prev ? updateConversation(prev) : prev
+                );
+            }
+
+            setAddingMember(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!addMemberOpen) return;
+
+        const query = memberSearch.trim();
+
+        if (!query) {
+            setAllUsers([]);
+            setLoadingUsers(false);
+            return;
+        }
+
+        const controller = new AbortController();
+
+        const timeoutId = setTimeout(async () => {
+            try {
+                setLoadingUsers(true);
+
+                const response = await fetch(
+                    `/api/users/search?q=${encodeURIComponent(query)}`,
+                    { signal: controller.signal }
+                );
+
+                if (!response.ok) {
+                    throw new Error("Failed to search users.");
+                }
+
+                const data = await response.json();
+
+                if (!controller.signal.aborted) {
+                    setAllUsers(
+                        Array.isArray(data.users) ? data.users : []
+                    );
+                }
+            } catch (error) {
+                if (
+                    error instanceof Error &&
+                    error.name !== "AbortError"
+                ) {
+                    console.error("ADD_MEMBER_SEARCH_ERROR:", error);
+                    setAllUsers([]);
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoadingUsers(false);
+                }
+            }
+        }, 300);
+
+        return () => {
+            clearTimeout(timeoutId);
+            controller.abort();
+        };
+    }, [memberSearch, addMemberOpen]);
 
     return (
         <main className="h-screen overflow-hidden bg-background">
@@ -2026,9 +2308,26 @@ export default function ChatPage() {
                                                     <div className="flex items-center justify-between">
                                                         <h3 className="font-semibold">Group members</h3>
 
-                                                        <span className="text-sm text-muted-foreground">
-                                                            {selectedConversation.members?.length ?? 0}
-                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-sm text-muted-foreground">
+                                                                {selectedConversation.members?.length ?? 0}
+                                                            </span>
+
+                                                            {isGroupAdmin && (
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    onClick={() => {
+                                                                        setSelectedMembersToAdd([]);
+                                                                        setMemberSearch("");
+                                                                        setAddMemberOpen(true);
+                                                                    }}
+                                                                >
+                                                                    <UserRoundPlus className="mr-2 h-4 w-4" />
+                                                                    Add
+                                                                </Button>
+                                                            )}
+                                                        </div>
                                                     </div>
 
                                                     <div className="space-y-1">
@@ -2062,6 +2361,23 @@ export default function ChatPage() {
                                                                             <span className="text-xs text-muted-foreground">
                                                                                 Member
                                                                             </span>
+                                                                        )}
+
+                                                                        {isGroupAdmin && !isMe && (
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="ghost"
+                                                                                size="sm"
+                                                                                disabled={removingMemberId === member.id}
+                                                                                className="text-destructive hover:text-destructive"
+                                                                                onClick={() => handleRemoveMember(member.id)}
+                                                                            >
+                                                                                {removingMemberId === member.id ? (
+                                                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                                                ) : (
+                                                                                    "Remove"
+                                                                                )}
+                                                                            </Button>
                                                                         )}
                                                                     </div>
                                                                 </div>
@@ -2112,6 +2428,143 @@ export default function ChatPage() {
                                 </SheetContent>
                             </Sheet>
 
+                            <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
+                                <DialogContent className="w-[calc(100%-2rem)] max-w-md">
+                                    <DialogHeader>
+                                        <DialogTitle>Add group members</DialogTitle>
+                                        <DialogDescription>
+                                            Search for people and select who you want to add.
+                                        </DialogDescription>
+                                    </DialogHeader>
+
+                                    <Input
+                                        placeholder="Search by name or username..."
+                                        value={memberSearch}
+                                        onChange={(e) => setMemberSearch(e.target.value)}
+                                    />
+
+                                    {selectedMembersToAdd.length > 0 && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {selectedMembersToAdd.map((user) => (
+                                                <button
+                                                    key={user.id}
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setSelectedMembersToAdd((prev) =>
+                                                            prev.filter((item) => item.id !== user.id)
+                                                        )
+                                                    }
+                                                    className="rounded-full border bg-muted px-3 py-1 text-sm"
+                                                >
+                                                    @{user.username} ×
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="max-h-64 space-y-1 overflow-y-auto">
+                                        {loadingUsers ? (
+                                            <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                Searching users...
+                                            </div>
+                                        ) : !memberSearch.trim() ? (
+                                            <p className="p-6 text-center text-sm text-muted-foreground">
+                                                Search by name or username to find people.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                {allUsers
+                                                    .filter(
+                                                        (user) =>
+                                                            user.id !== currentUserId &&
+                                                            !selectedConversation?.members?.some(
+                                                                (member) => member.id === user.id
+                                                            )
+                                                    )
+                                                    .map((user) => {
+                                                        const isSelected = selectedMembersToAdd.some(
+                                                            (selected) => selected.id === user.id
+                                                        );
+
+                                                        return (
+                                                            <button
+                                                                key={user.id}
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setSelectedMembersToAdd((prev) =>
+                                                                        isSelected
+                                                                            ? prev.filter(
+                                                                                (item) => item.id !== user.id
+                                                                            )
+                                                                            : [...prev, user]
+                                                                    )
+                                                                }
+                                                                className={`flex w-full items-center justify-between rounded-lg p-3 text-left hover:bg-accent ${isSelected ? "bg-accent" : ""
+                                                                    }`}
+                                                            >
+                                                                <div className="min-w-0">
+                                                                    <p className="truncate font-medium">
+                                                                        {user.name}
+                                                                    </p>
+                                                                    <p className="truncate text-sm text-muted-foreground">
+                                                                        @{user.username}
+                                                                    </p>
+                                                                </div>
+
+                                                                {isSelected && (
+                                                                    <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />
+                                                                )}
+                                                            </button>
+                                                        );
+                                                    })}
+
+                                                {!allUsers.some(
+                                                    (user) =>
+                                                        user.id !== currentUserId &&
+                                                        !selectedConversation?.members?.some(
+                                                            (member) => member.id === user.id
+                                                        )
+                                                ) && (
+                                                        <p className="p-4 text-center text-sm text-muted-foreground">
+                                                            No available users found.
+                                                        </p>
+                                                    )}
+                                            </>
+                                        )}
+                                    </div>
+
+                                    <DialogFooter>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => setAddMemberOpen(false)}
+                                            disabled={addingMember}
+                                        >
+                                            Cancel
+                                        </Button>
+
+                                        <Button
+                                            type="button"
+                                            disabled={
+                                                addingMember || selectedMembersToAdd.length === 0
+                                            }
+                                            onClick={handleAddMember}
+                                        >
+                                            {addingMember ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Adding...
+                                                </>
+                                            ) : (
+                                                `Add ${selectedMembersToAdd.length || ""} ${selectedMembersToAdd.length === 1 ? "member" : "members"
+                                                }`
+                                            )}
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+
                             <div className="relative flex min-h-0 flex-1 flex-col">
                                 <div
                                     className="pointer-events-none absolute inset-0 bg-repeat opacity-10"
@@ -2151,12 +2604,12 @@ export default function ChatPage() {
                                                             ) : (
                                                                 <div className={`w-fit group  ${msg.attachments?.some((a) => a.type === "IMAGE")
                                                                     ? "max-w-[50%] sm:max-w-[40%]"
-                                                                    : "max-w-[80%] sm:max-w-[65%] sm:w-[12%]"
+                                                                    : "max-w-[85%] sm:max-w-[65%]"
                                                                     }`}>
                                                                     <div
                                                                         className={`px-3.5 py-1 shadow-sm ${isMine
-                                                                            ? "bg-blue-600 text-white rounded-bl-2xl rounded-tl-2xl rounded-tr-2xl "
-                                                                            : "bg-white text-gray-900 rounded-br-2xl rounded-tl-2xl rounded-tr-2xl "
+                                                                            ? "bg-blue-600 text-white rounded-bl-2xl rounded-tl-2xl rounded-tr-2xl"
+                                                                            : "bg-white text-gray-900 rounded-br-2xl rounded-tl-2xl rounded-tr-2xl"
                                                                             }`}
                                                                     >
                                                                         {selectedConversation.isGroup && (
@@ -2200,6 +2653,17 @@ export default function ChatPage() {
                                                                                                 preload="metadata"
                                                                                                 className="max-h-72 w-60 max-w-full rounded-xl"
                                                                                             />
+                                                                                        )}
+
+                                                                                        {attachment.type === "AUDIO" && (
+                                                                                            <div className="mb-2 w-[min(320px,65vw)] min-w-0 max-w-full">
+                                                                                                <audio
+                                                                                                    src={attachment.url}
+                                                                                                    controls
+                                                                                                    preload="metadata"
+                                                                                                    className="block w-full min-w-0 max-w-full"
+                                                                                                />
+                                                                                            </div>
                                                                                         )}
 
                                                                                         {attachment.type === "DOCUMENT" && (
@@ -2289,7 +2753,6 @@ export default function ChatPage() {
                                                                     </div>
                                                                 </div>
                                                             )}
-
                                                         </div>
                                                     );
                                                 })
@@ -2431,121 +2894,141 @@ export default function ChatPage() {
                                     </div>
                                 )}
 
-                                <div className="relative shrink-0 px-4 pb-4 pt-2 sm:px-5 sm:pb-5">
-                                    <div className="mx-auto flex w-full items-end rounded-3xl gap-2 border bg-accent px-3 py-2 shadow-sm">
-                                        <div className="relative">
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon-lg"
-                                                onClick={() => setShowAttachmentMenu((prev) => !prev)}
-                                            >
-                                                <Paperclip className="h-5 w-5" />
-                                            </Button>
+                                {showVoiceRecorder ? (
+                                    <VoiceRecorder
+                                        onSend={sendVoiceMessage}
+                                        onCancel={() => setShowVoiceRecorder(false)}
+                                    />
+                                ) :
+                                    < div className="relative shrink-0 px-4 pb-4 pt-2 sm:px-5 sm:pb-5">
+                                        <div className="mx-auto flex w-full items-end rounded-3xl gap-2 border bg-accent px-3 py-2 shadow-sm">
+                                            <div className="relative">
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon-lg"
+                                                    onClick={() => setShowAttachmentMenu((prev) => !prev)}
+                                                >
+                                                    <Paperclip className="h-5 w-5" />
+                                                </Button>
 
-                                            {showAttachmentMenu && (
-                                                <div className="absolute bottom-14 left-0 z-50 w-52 rounded-xl border bg-background p-2 shadow-lg">
-                                                    <button
-                                                        type="button"
-                                                        className="flex w-full items-center gap-3 rounded-lg p-3 text-sm hover:bg-muted"
-                                                        onClick={() => {
-                                                            fileInputRef.current?.click();
-                                                            setShowAttachmentMenu(false);
-                                                        }}
-                                                    >
-                                                        <ImageIcon className="h-5 w-5" />
-                                                        Photos & Videos
-                                                    </button>
+                                                {showAttachmentMenu && (
+                                                    <div className="absolute bottom-14 left-0 z-50 w-52 rounded-xl border bg-background p-2 shadow-lg">
+                                                        <button
+                                                            type="button"
+                                                            className="flex w-full items-center gap-3 rounded-lg p-3 text-sm hover:bg-muted"
+                                                            onClick={() => {
+                                                                fileInputRef.current?.click();
+                                                                setShowAttachmentMenu(false);
+                                                            }}
+                                                        >
+                                                            <ImageIcon className="h-5 w-5" />
+                                                            Photos & Videos
+                                                        </button>
 
-                                                    <button
-                                                        type="button"
-                                                        className="flex w-full items-center gap-3 rounded-lg p-3 text-sm hover:bg-muted"
-                                                        onClick={() => {
-                                                            fileInputRef.current?.click();
-                                                            setShowAttachmentMenu(false);
-                                                        }}
-                                                    >
-                                                        <FileText className="h-5 w-5" />
-                                                        Document
-                                                    </button>
-                                                </div>
-                                            )}
+                                                        <button
+                                                            type="button"
+                                                            className="flex w-full items-center gap-3 rounded-lg p-3 text-sm hover:bg-muted"
+                                                            onClick={() => {
+                                                                fileInputRef.current?.click();
+                                                                setShowAttachmentMenu(false);
+                                                            }}
+                                                        >
+                                                            <FileText className="h-5 w-5" />
+                                                            Document
+                                                        </button>
+                                                    </div>
+                                                )}
 
-                                            <input
-                                                ref={fileInputRef}
-                                                type="file"
-                                                accept="image/*,video/*,.pdf,.doc,.docx,.txt,.xls,.xlsx,.ppt,.pptx"
-                                                className="hidden"
-                                                onChange={handleFileChange}
+                                                <input
+                                                    ref={fileInputRef}
+                                                    type="file"
+                                                    accept="image/*,video/*,.pdf,.doc,.docx,.txt,.xls,.xlsx,.ppt,.pptx"
+                                                    className="hidden"
+                                                    onChange={handleFileChange}
+                                                />
+                                            </div>
+
+                                            <div className="relative">
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon-lg"
+                                                    className="hidden h-10 w-10 shrink-0 rounded-full sm:inline-flex"
+                                                    onClick={() => setShowEmojiPicker((prev) => !prev)}
+                                                >
+                                                    <Smile className="h-6 w-6" />
+                                                </Button>
+
+                                                {showEmojiPicker && (
+                                                    <div className="absolute bottom-14 right-0 z-50">
+                                                        <EmojiPicker
+                                                            onEmojiClick={(emojiData) => {
+                                                                setMessage((prev) => prev + emojiData.emoji);
+                                                            }}
+                                                            width={320}
+                                                            height={400}
+                                                            previewConfig={{ showPreview: false }}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <Textarea
+                                                value={message}
+                                                onChange={(e) => {
+                                                    setMessage(e.target.value)
+                                                    handleTyping()
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter" && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        sendMessage();
+                                                    }
+                                                }}
+                                                placeholder="Type a message..."
+                                                className="min-h-10 max-h-24 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2.5 leading-5 shadow-none focus-visible:ring-0 dark:bg-accent"
                                             />
-                                        </div>
 
-                                        <div className="relative">
                                             <Button
                                                 type="button"
+                                                size="icon"
                                                 variant="ghost"
-                                                size="icon-lg"
-                                                className="hidden h-10 w-10 shrink-0 rounded-full sm:inline-flex"
-                                                onClick={() => setShowEmojiPicker((prev) => !prev)}
+                                                className="h-10 w-10 shrink-0 rounded-full"
+                                                disabled={isUploading}
+                                                onClick={() => setShowVoiceRecorder(true)}
+                                                aria-label="Record voice message"
                                             >
-                                                <Smile className="h-6 w-6" />
+                                                <Mic className="h-5 w-5" />
                                             </Button>
 
-                                            {showEmojiPicker && (
-                                                <div className="absolute bottom-14 right-0 z-50">
-                                                    <EmojiPicker
-                                                        onEmojiClick={(emojiData) => {
-                                                            setMessage((prev) => prev + emojiData.emoji);
-                                                        }}
-                                                        width={320}
-                                                        height={400}
-                                                        previewConfig={{ showPreview: false }}
-                                                    />
-                                                </div>
-                                            )}
+                                            <Button
+                                                type="button"
+                                                size="icon"
+                                                className="h-10 w-10 shrink-0 rounded-full"
+                                                disabled={
+                                                    isUploading ||
+                                                    (!message.trim() && !selectedFile)
+                                                }
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter" && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        sendMessage();
+                                                    }
+                                                }}
+                                                onClick={sendMessage}
+                                            >
+                                                {isUploading ? (
+                                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                                ) : (
+                                                    <Send className="h-5 w-5" />
+                                                )}
+                                            </Button>
                                         </div>
-
-                                        <Textarea
-                                            value={message}
-                                            onChange={(e) => {
-                                                setMessage(e.target.value)
-                                                handleTyping()
-                                            }}
-                                            onKeyDown={(e) => {
-                                                if (e.key === "Enter" && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    sendMessage();
-                                                }
-                                            }}
-                                            placeholder="Type a message..."
-                                            className="min-h-10 max-h-24 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2.5 leading-5 shadow-none focus-visible:ring-0 dark:bg-accent"
-                                        />
-
-                                        <Button
-                                            type="button"
-                                            size="icon"
-                                            className="h-10 w-10 shrink-0 rounded-full"
-                                            disabled={
-                                                isUploading ||
-                                                (!message.trim() && !selectedFile)
-                                            }
-                                            onKeyDown={(e) => {
-                                                if (e.key === "Enter" && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    sendMessage();
-                                                }
-                                            }}
-                                            onClick={sendMessage}
-                                        >
-                                            {isUploading ? (
-                                                <Loader2 className="h-5 w-5 animate-spin" />
-                                            ) : (
-                                                <Send className="h-5 w-5" />
-                                            )}
-                                        </Button>
                                     </div>
-                                </div>
+                                }
                             </div>
+
                         </>
                     ) : (
                         <div className="hidden h-full flex-1 flex-col items-center justify-center md:flex bg-accent/40">
@@ -2565,6 +3048,6 @@ export default function ChatPage() {
                     )}
                 </section>
             </div>
-        </main>
+        </main >
     );
 }

@@ -25,6 +25,14 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-powerpoint",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aac",
+  "audio/3gpp",
 ]);
 
 export async function getAuthenticatedUser(req: Request) {
@@ -55,6 +63,8 @@ export async function getAuthenticatedUser(req: Request) {
 function getAttachmentType(mimeType: string) {
   if (mimeType.startsWith("image/")) return "IMAGE" as const;
   if (mimeType.startsWith("video/")) return "VIDEO" as const;
+  if (mimeType.startsWith("audio/")) return "AUDIO" as const;
+
   return "DOCUMENT" as const;
 }
 
@@ -197,6 +207,13 @@ export async function POST(
     const formData = await req.formData();
     const contentValue = formData.get("content");
     const fileValue = formData.get("file");
+    const durationValue = formData.get("duration");
+
+    const duration =
+      typeof durationValue === "string" &&
+      Number.isFinite(Number(durationValue))
+        ? Math.max(0, Math.floor(Number(durationValue)))
+        : null;
 
     const content = typeof contentValue === "string" ? contentValue.trim() : "";
 
@@ -218,7 +235,9 @@ export async function POST(
         );
       }
 
-      if (!ALLOWED_MIME_TYPES.has(file.type)) {
+      const mimeType = file.type.split(";")[0].trim().toLowerCase();
+
+      if (!ALLOWED_MIME_TYPES.has(mimeType)) {
         return NextResponse.json(
           { success: false, message: "File type is not supported" },
           { status: 400 },
@@ -228,11 +247,12 @@ export async function POST(
 
     let attachmentData:
       | {
-          type: "IMAGE" | "VIDEO" | "DOCUMENT";
+          type: "IMAGE" | "VIDEO" | "DOCUMENT" | "AUDIO";
           url: string;
           name: string;
           size: number;
           mimeType: string;
+          duration?: number | null;
         }
       | undefined;
 
@@ -253,7 +273,7 @@ export async function POST(
           Bucket: BUCKET_NAME,
           Key: uploadedKey,
           Body: bytes,
-          ContentType: file.type,
+          ContentType: file.type.split(";")[0].trim().toLowerCase(),
         }),
       );
 
@@ -262,7 +282,8 @@ export async function POST(
         url: uploadedKey,
         name: file.name,
         size: file.size,
-        mimeType: file.type,
+        mimeType: file.type.split(";")[0].trim().toLowerCase(),
+        duration: getAttachmentType(file.type) === "AUDIO" ? duration : null,
       };
     }
 
