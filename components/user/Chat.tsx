@@ -141,7 +141,7 @@ export default function ChatPage() {
     const [searchResults, setSearchResults] = useState<User[]>([]);
     const [searching, setSearching] = useState(false);
 
-    const socket = useMemo(() => io("http://localhost:5000", { autoConnect: false }), [])
+    const socket = useMemo(() => io("https://server.chitchat-backend.publicvm.com", { autoConnect: false }), [])
 
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [Username, setUsername] = useState<string | null>(null)
@@ -2705,50 +2705,59 @@ export default function ChatPage() {
                                                                                 }`}>
                                                                                 {msg.time}
                                                                             </span>
+                                                                            
+                                                                            {msg.content !== "This message was deleted" && (
+                                                                                <DropdownMenu>
+                                                                                    <DropdownMenuTrigger className={`rounded-full p-1 transition hover:bg-black/5 hover:opacity-100 focus:opacity-100 opacity-0 group-hover:opacity-100 ${isMine
+                                                                                        ? "text-blue-100"
+                                                                                        : "text-violet-600"
+                                                                                        }`}>
 
-                                                                            <DropdownMenu>
-                                                                                <DropdownMenuTrigger className={`rounded-full p-1 transition hover:bg-black/5 hover:opacity-100 focus:opacity-100 opacity-0 group-hover:opacity-100 ${isMine
-                                                                                    ? "text-blue-100"
-                                                                                    : "text-violet-600"
-                                                                                    }`}>
+                                                                                        <ChevronDown className="h-4 w-4" />
+                                                                                    </DropdownMenuTrigger>
 
-                                                                                    <ChevronDown className="h-4 w-4" />
-                                                                                </DropdownMenuTrigger>
+                                                                                    <DropdownMenuContent align="end">
+                                                                                        <DropdownMenuItem
+                                                                                            className="flex items-center gap-2"
+                                                                                            onClick={() =>
+                                                                                                handleCopyMessage(msg.content)
+                                                                                            }
+                                                                                            disabled={!msg.content}
+                                                                                        >
+                                                                                            <Copy className="h-4 w-4" />
+                                                                                            Copy
+                                                                                        </DropdownMenuItem>
 
-                                                                                <DropdownMenuContent align="end">
-                                                                                    <DropdownMenuItem
-                                                                                        className="flex items-center gap-2"
-                                                                                        onClick={() =>
-                                                                                            handleCopyMessage(msg.content)
-                                                                                        }
-                                                                                        disabled={!msg.content}
-                                                                                    >
-                                                                                        <Copy className="h-4 w-4" />
-                                                                                        Copy
-                                                                                    </DropdownMenuItem>
+                                                                                        <DropdownMenuItem
+                                                                                            className={`flex items-center gap-2 ${isMine && !msg.attachments?.some(
+                                                                                                (a) =>
+                                                                                                    a.type === "AUDIO" ||
+                                                                                                    a.type === "IMAGE" ||
+                                                                                                    a.type === "DOCUMENT" ||
+                                                                                                    a.type === "VIDEO"
+                                                                                            )
+                                                                                                ? "flex"
+                                                                                                : "hidden"
+                                                                                                }`}
+                                                                                            disabled={!isMine}
+                                                                                            onClick={() => handleEditMessage(msg)}
+                                                                                        >
+                                                                                            <Pencil className="h-4 w-4" />
+                                                                                            Edit
+                                                                                        </DropdownMenuItem>
 
-                                                                                    <DropdownMenuItem
-                                                                                        className={`flex items-center gap-2 ${isMine ? "flex" : "hidden"}`}
-                                                                                        disabled={!isMine}
-                                                                                        onClick={() =>
-                                                                                            handleEditMessage(msg)
-                                                                                        }
-                                                                                    >
-                                                                                        <Pencil className="h-4 w-4" />
-                                                                                        Edit
-                                                                                    </DropdownMenuItem>
-
-                                                                                    <DropdownMenuItem
-                                                                                        className={`flex items-center gap-2 text-red-600 transition duration-200 hover:bg-red-400 ${isMine ? "flex" : "hidden"}`}
-                                                                                        onClick={() =>
-                                                                                            handleDeleteMessage(msg)
-                                                                                        }
-                                                                                    >
-                                                                                        <Trash2 className="h-4 w-4" />
-                                                                                        Delete
-                                                                                    </DropdownMenuItem>
-                                                                                </DropdownMenuContent>
-                                                                            </DropdownMenu>
+                                                                                        <DropdownMenuItem
+                                                                                            className={`flex items-center gap-2 text-red-600 transition duration-200 hover:bg-red-400 ${isMine ? "flex" : "hidden"}`}
+                                                                                            onClick={() =>
+                                                                                                handleDeleteMessage(msg)
+                                                                                            }
+                                                                                        >
+                                                                                            <Trash2 className="h-4 w-4" />
+                                                                                            Delete
+                                                                                        </DropdownMenuItem>
+                                                                                    </DropdownMenuContent>
+                                                                                </DropdownMenu>
+                                                                            )}
                                                                         </div>
                                                                     </div>
                                                                 </div>
